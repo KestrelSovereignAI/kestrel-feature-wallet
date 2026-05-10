@@ -162,7 +162,7 @@ class FilecoinKeyManager:
             return
 
         try:
-            from kestrel_sovereign.security.key_storage import SecureKeyStorage
+            from .secure_key_storage import SecureKeyStorage
             self._secure_storage = SecureKeyStorage(storage_dir=self.storage_dir)
             logger.info("FilecoinKeyManager using encrypted key storage")
         except ImportError as e:
