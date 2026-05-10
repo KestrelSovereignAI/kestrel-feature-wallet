@@ -49,7 +49,9 @@ class TestBaseNetworkConfig:
 
     def test_base_sepolia_has_faucet(self):
         config = NetworkConfig.get_config(ChainNetwork.BASE_SEPOLIA)
-        assert config.faucet_url is not None
+        assert config.faucet_url == (
+            "https://docs.base.org/base-chain/network-information/network-faucets"
+        )
 
     def test_base_mainnet_explorer(self):
         config = NetworkConfig.get_config(ChainNetwork.BASE_MAINNET)

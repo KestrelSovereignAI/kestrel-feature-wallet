@@ -71,6 +71,13 @@ The Filecoin address and Base/EVM address are derived from the same secp256k1 ke
 
 Base Mainnet (`base_mainnet`) is blocked unless `KESTREL_ALLOW_MAINNET` is explicitly enabled.
 
+For x402 testing, the wallet needs Base Sepolia ETH for gas and Base Sepolia USDC for payments.
+Filecoin Calibration FIL is a different testnet asset and cannot pay Base Sepolia x402 invoices.
+Current faucet references:
+
+- Base Sepolia ETH: https://docs.base.org/base-chain/network-information/network-faucets
+- Base Sepolia USDC: https://faucet.circle.com/
+
 ## x402 Buyer
 
 `X402Buyer` wraps the Python x402 SDK with the agent's EVM private key and returns payment receipt metadata for audit trails.
