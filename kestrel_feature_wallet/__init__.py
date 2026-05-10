@@ -18,6 +18,12 @@ from .filecoin_testnet import FilecoinTestnetAdapter, FilecoinNetwork
 from .filecoin_keys import FilecoinKeyManager
 from .transaction_manager import TransactionManager, TransactionAudit
 from .transaction_hook import TransactionSecurityHook
+from .x402_buyer import (
+    X402Buyer,
+    X402BuyerError,
+    X402PaidResponse,
+    X402PaymentReceipt,
+)
 
 # Import chain adapters (handles web3 optionality internally)
 from .chain_adapters import (
@@ -67,6 +73,10 @@ __all__ = [
     "TransactionManager",
     "TransactionAudit",
     "TransactionSecurityHook",
+    "X402Buyer",
+    "X402BuyerError",
+    "X402PaidResponse",
+    "X402PaymentReceipt",
     "ChainNetwork",
     "ChainAdapter",
     "EVMAdapter",

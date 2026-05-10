@@ -20,6 +20,12 @@ With Stripe on-ramp:
 uv pip install "kestrel-feature-wallet[stripe]"
 ```
 
+With x402 buyer support:
+
+```bash
+uv pip install "kestrel-feature-wallet[x402]"
+```
+
 For local tests:
 
 ```bash
@@ -33,7 +39,7 @@ uv run pytest
 - `aiosqlite>=0.21.0`
 - `httpx>=0.27.0`
 - `cryptography>=45.0.5`
-- Optional: `web3>=7.0.0` (via `[evm]`), `stripe>=10.0.0` (via `[stripe]`)
+- Optional: `web3>=7.0.0` (via `[evm]`), `stripe>=10.0.0` (via `[stripe]`), `x402[httpx]>=2.9.0` (via `[x402]`)
 
 ## Usage
 
@@ -64,6 +70,21 @@ The Filecoin address and Base/EVM address are derived from the same secp256k1 ke
 ```
 
 Base Mainnet (`base_mainnet`) is blocked unless `KESTREL_ALLOW_MAINNET` is explicitly enabled.
+
+## x402 Buyer
+
+`X402Buyer` wraps the Python x402 SDK with the agent's EVM private key and returns payment receipt metadata for audit trails.
+
+```python
+from kestrel_feature_wallet import X402Buyer
+
+buyer = X402Buyer(private_key="0x...")
+paid = await buyer.post_with_payment("https://example.com/paid-upload", content=b"...")
+print(paid.response.status_code)
+print(paid.receipt)
+```
+
+Core storage integrations should use this buyer primitive instead of handling private keys directly.
 
 ## Development
 
