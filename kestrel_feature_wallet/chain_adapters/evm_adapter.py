@@ -178,7 +178,11 @@ class EVMAdapter(ChainAdapter):
             Transaction result with hash or error
         """
         # CRITICAL SECURITY CHECK: Block mainnet transactions unless explicitly allowed
-        if self.config.chain_id in MAINNET_CHAIN_IDS and not os.environ.get("KESTREL_ALLOW_MAINNET"):
+        mainnet_opt_in = os.environ.get("KESTREL_ALLOW_MAINNET", "").lower()
+        if (
+            self.config.chain_id in MAINNET_CHAIN_IDS
+            and mainnet_opt_in not in {"1", "true", "yes"}
+        ):
             return TransactionResult(
                 success=False,
                 error=(

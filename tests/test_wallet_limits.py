@@ -9,6 +9,7 @@ Tests critical security mechanisms that prevent financial loss:
 
 import os
 import pytest
+import pytest_asyncio
 pytest.importorskip("web3", reason="web3 not installed (wallet extras)")
 from decimal import Decimal
 from datetime import date, timedelta
@@ -31,7 +32,7 @@ class TestDailySpendingLimits:
         """Create temporary storage directory."""
         return tmp_path / "wallet_test"
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def tx_manager(self, temp_storage):
         """Create transaction manager with default $100 daily limit."""
         manager = TransactionManager(
@@ -137,6 +138,20 @@ class TestDailySpendingLimits:
             del os.environ["KESTREL_TX_DAILY_LIMIT_USD"]
 
     @pytest.mark.asyncio
+    async def test_mainnet_opt_in_accepts_one(self, tmp_path):
+        """The documented KESTREL_ALLOW_MAINNET=1 value should be accepted."""
+        os.environ["KESTREL_ALLOW_MAINNET"] = "1"
+
+        try:
+            manager = TransactionManager(
+                agent_id="test-mainnet-opt-in",
+                storage_dir=tmp_path / "mainnet_opt_in",
+            )
+            assert manager.allow_mainnet is True
+        finally:
+            del os.environ["KESTREL_ALLOW_MAINNET"]
+
+    @pytest.mark.asyncio
     async def test_testnet_transactions_skip_limit_check(self, tx_manager):
         """Testnet transactions should not count toward spending limits."""
         # This is tested at the TransactionManager.send_native level
@@ -192,6 +207,27 @@ class TestMainnetBlocking:
         assert "Mainnet transactions blocked" in result.error
         assert "chain_id=1" in result.error
         assert "KESTREL_ALLOW_MAINNET=1" in result.error
+
+    @pytest.mark.asyncio
+    async def test_mainnet_false_value_still_blocks(self, temp_storage):
+        """Only explicit truthy opt-in values should enable mainnet transactions."""
+        from kestrel_feature_wallet.chain_adapters.evm_adapter import EVMAdapter
+        from kestrel_feature_wallet.chain_adapters import TransactionRequest
+
+        os.environ["KESTREL_ALLOW_MAINNET"] = "false"
+        try:
+            adapter = EVMAdapter(ChainNetwork.ETHEREUM_MAINNET)
+            request = TransactionRequest(
+                to_address="0x0000000000000000000000000000000000000000",
+                amount=Decimal("0.001"),
+                network=ChainNetwork.ETHEREUM_MAINNET,
+            )
+            result = await adapter.send_transaction(request, b'\x01' * 32)
+        finally:
+            del os.environ["KESTREL_ALLOW_MAINNET"]
+
+        assert result.success is False
+        assert "Mainnet transactions blocked" in result.error
 
     @pytest.mark.asyncio
     async def test_polygon_mainnet_blocked_without_env_var(self, temp_storage):
@@ -289,7 +325,7 @@ class TestTransactionAuditLogging:
         """Create temporary storage directory."""
         return tmp_path / "audit_test"
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def tx_manager(self, temp_storage):
         """Create transaction manager."""
         manager = TransactionManager(

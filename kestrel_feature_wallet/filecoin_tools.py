@@ -218,13 +218,13 @@ Or manually set with an existing address."""
 
     @tool(
         name="wallet_address",
-        description="Show Filecoin address and explorer link",
+        description="Show Filecoin and EVM/Base wallet addresses",
         category=ToolCategory.SYSTEM,
         command_prefix="!wallet-address"
     )
     async def wallet_address(self) -> ToolResult:
         """
-        Show the wallet's Filecoin address and helpful links.
+        Show the wallet's Filecoin and EVM addresses with helpful links.
 
         Returns:
             ToolResult.ok with address info and explorer/faucet
@@ -252,24 +252,78 @@ Generate one with: `!wallet-generate-address`"""
         on_chain = await self.wallet.get_on_chain_balance()
         balance_str = f"{on_chain} FIL" if on_chain is not None else "Unable to query"
 
-        confirmation = f"""🔗 **Filecoin Address**
-
-**Address:** `{address}`
-**Network:** Calibration (testnet)
-**On-chain Balance:** {balance_str}
-
-**Links:**
-- [View on Explorer]({explorer_url})
-- [Request Test FIL]({faucet_url})
-
-Use `!wallet-sync` to sync on-chain balance with wallet."""
+        lines = [
+            "🔗 **Wallet Addresses**",
+            "",
+            "**Filecoin**",
+            f"Address: `{address}`",
+            "Network: Calibration (testnet)",
+            f"On-chain Balance: {balance_str}",
+            "",
+            "Links:",
+            f"- [View on Explorer]({explorer_url})",
+            f"- [Request Test FIL]({faucet_url})",
+        ]
 
         data = {
             "address": address,
             "explorer_url": explorer_url,
             "faucet_url": faucet_url,
             "on_chain_balance": str(on_chain) if on_chain is not None else None,
+            "evm_address": None,
         }
+
+        try:
+            from .chain_adapters import ChainNetwork, NetworkConfig
+            from .chain_adapters.evm_adapter import EVMAdapter
+
+            storage_dir = self._get_wallet_storage_dir()
+            private_key_bytes = self._load_wallet_private_key_bytes(storage_dir)
+            if private_key_bytes is not None:
+                base_sepolia = NetworkConfig.get_config(ChainNetwork.BASE_SEPOLIA)
+                base_mainnet = NetworkConfig.get_config(ChainNetwork.BASE_MAINNET)
+                evm_address = EVMAdapter(
+                    ChainNetwork.BASE_SEPOLIA
+                ).get_address_from_private_key(private_key_bytes)
+                data["evm_address"] = evm_address
+                data["base_sepolia_url"] = base_sepolia.get_address_url(evm_address)
+                data["base_mainnet_url"] = base_mainnet.get_address_url(evm_address)
+
+                lines.extend([
+                    "",
+                    "**EVM / Base**",
+                    f"Address: `{evm_address}`",
+                    f"Base Sepolia: {data['base_sepolia_url']}",
+                    f"Base Mainnet: {data['base_mainnet_url']}",
+                    "",
+                    "Use `!wallet-chain-balance base_sepolia USDC` to query Base Sepolia USDC.",
+                ])
+            else:
+                lines.extend([
+                    "",
+                    "**EVM / Base**",
+                    "Unavailable: encrypted private key not found.",
+                ])
+        except ImportError:
+            lines.extend([
+                "",
+                "**EVM / Base**",
+                "Unavailable: install with the `evm` extra to derive Base addresses.",
+            ])
+        except Exception as e:
+            logger.error(f"Failed to derive EVM address: {e}", exc_info=True)
+            lines.extend([
+                "",
+                "**EVM / Base**",
+                f"Unavailable: {e}",
+            ])
+
+        lines.extend([
+            "",
+            "Use `!wallet-sync` to sync Filecoin on-chain balance with wallet.",
+        ])
+
+        confirmation = "\n".join(lines)
         if on_chain is None:
             return ToolResult.partial(
                 confirmation,

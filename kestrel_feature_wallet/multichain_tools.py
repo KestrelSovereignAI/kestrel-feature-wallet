@@ -14,6 +14,7 @@ import logging
 import os
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Optional
 
 from kestrel_sdk.features.base import tool
 from kestrel_sdk.tools.base import ToolCategory
@@ -28,6 +29,23 @@ class MultichainToolsMixin:
 
     Requires self.wallet (WalletAgent) to be available.
     """
+
+    def _get_wallet_storage_dir(self) -> Path:
+        db_path = self.wallet.db_path
+        if db_path:
+            return Path(db_path).parent
+        return Path(os.environ.get("KESTREL_DB_PATH", "./agent_dbs"))
+
+    def _load_wallet_private_key_bytes(self, storage_dir: Path) -> Optional[bytes]:
+        from .filecoin_keys import FilecoinKeyManager
+
+        key_manager = FilecoinKeyManager(storage_dir=storage_dir)
+        if not key_manager.has_address(self.wallet.agent_id):
+            return None
+
+        key_id = key_manager._get_key_id(self.wallet.agent_id)
+        private_key = key_manager._secure_storage.load_private_key(key_id)
+        return private_key.private_numbers().private_value.to_bytes(32, "big")
 
     @tool(
         name="wallet_send",
@@ -60,7 +78,6 @@ class MultichainToolsMixin:
         try:
             from .transaction_manager import TransactionManager
             from .chain_adapters import ChainNetwork
-            from .filecoin_keys import FilecoinKeyManager
 
             # Parse amount
             try:
@@ -81,20 +98,14 @@ class MultichainToolsMixin:
                 )
 
             # Get storage directory
-            db_path = self.wallet.db_path
-            storage_dir = Path(db_path).parent if db_path else Path(os.environ.get("KESTREL_DB_PATH", "./agent_dbs"))
+            storage_dir = self._get_wallet_storage_dir()
 
             # Load private key
-            key_manager = FilecoinKeyManager(storage_dir=storage_dir)
-            if not key_manager.has_address(self.wallet.agent_id):
+            private_key_bytes = self._load_wallet_private_key_bytes(storage_dir)
+            if private_key_bytes is None:
                 return ToolResult.failed(
                     error="❌ No wallet key found. Run `!wallet-generate-address` first."
                 )
-
-            # Load private key from secure storage
-            key_id = key_manager._get_key_id(self.wallet.agent_id)
-            private_key = key_manager._secure_storage.load_private_key(key_id)
-            private_key_bytes = private_key.private_numbers().private_value.to_bytes(32, 'big')
 
             # Create transaction manager
             tx_manager = TransactionManager(
@@ -186,7 +197,6 @@ class MultichainToolsMixin:
         try:
             from .transaction_manager import TransactionManager
             from .chain_adapters import ChainNetwork, TokenRegistry
-            from .filecoin_keys import FilecoinKeyManager
 
             # Parse amount
             try:
@@ -220,19 +230,14 @@ class MultichainToolsMixin:
                     )
 
             # Get storage directory
-            db_path = self.wallet.db_path
-            storage_dir = Path(db_path).parent if db_path else Path(os.environ.get("KESTREL_DB_PATH", "./agent_dbs"))
+            storage_dir = self._get_wallet_storage_dir()
 
             # Load private key
-            key_manager = FilecoinKeyManager(storage_dir=storage_dir)
-            if not key_manager.has_address(self.wallet.agent_id):
+            private_key_bytes = self._load_wallet_private_key_bytes(storage_dir)
+            if private_key_bytes is None:
                 return ToolResult.failed(
                     error="❌ No wallet key found. Run `!wallet-generate-address` first."
                 )
-
-            key_id = key_manager._get_key_id(self.wallet.agent_id)
-            private_key = key_manager._secure_storage.load_private_key(key_id)
-            private_key_bytes = private_key.private_numbers().private_value.to_bytes(32, 'big')
 
             # Create transaction manager
             tx_manager = TransactionManager(
@@ -297,6 +302,118 @@ class MultichainToolsMixin:
             return ToolResult.failed(error=f"❌ Token transfer failed: {e}")
 
     @tool(
+        name="wallet_chain_balance",
+        description="Check native or ERC-20 balance on an EVM chain",
+        category=ToolCategory.SYSTEM,
+        command_prefix="!wallet-chain-balance"
+    )
+    async def wallet_chain_balance(
+        self,
+        network: str = "base_sepolia",
+        token_symbol: str = "USDC",
+    ) -> ToolResult:
+        """
+        Query an on-chain EVM balance for the agent's wallet address.
+
+        Args:
+            network: Target network, e.g. base_sepolia or base_mainnet
+            token_symbol: ERC-20 symbol such as USDC, or "native" for ETH/FIL/MATIC
+
+        Returns:
+            ToolResult with balance report, address, and explorer link
+        """
+        if not self.wallet:
+            return ToolResult.failed(error="❌ Wallet not initialized")
+
+        try:
+            from .transaction_manager import TransactionManager
+            from .chain_adapters import ChainNetwork, NetworkConfig, TokenRegistry
+            from .chain_adapters.evm_adapter import EVMAdapter
+
+            try:
+                chain = ChainNetwork(network)
+            except ValueError:
+                networks = [n.value for n in ChainNetwork]
+                return ToolResult.failed(
+                    error=f"❌ Invalid network: {network}\nAvailable: {', '.join(networks)}"
+                )
+
+            storage_dir = self._get_wallet_storage_dir()
+            private_key_bytes = self._load_wallet_private_key_bytes(storage_dir)
+            if private_key_bytes is None:
+                return ToolResult.failed(
+                    error="❌ No wallet key found. Run `!wallet-generate-address` first."
+                )
+
+            address = EVMAdapter(chain).get_address_from_private_key(private_key_bytes)
+            tx_manager = TransactionManager(
+                agent_id=self.wallet.agent_id,
+                storage_dir=storage_dir,
+            )
+            await tx_manager.initialize()
+
+            token_upper = token_symbol.upper()
+            config = NetworkConfig.get_config(chain)
+
+            if token_upper == "NATIVE":
+                balance = await tx_manager.get_balance(chain, address)
+                label = config.native_token
+            else:
+                token = TokenRegistry.get_token(token_upper, chain)
+                if not token:
+                    available = TokenRegistry.list_tokens(chain)
+                    await tx_manager.close()
+                    if available:
+                        return ToolResult.failed(
+                            error=(
+                                f"❌ Token {token_symbol} not available on {chain.display_name}\n"
+                                f"Available: {', '.join(t.symbol for t in available)}"
+                            )
+                        )
+                    return ToolResult.failed(
+                        error=f"❌ No tokens registered for {chain.display_name}"
+                    )
+                balance = await tx_manager.get_token_balance(chain, token_upper, address)
+                label = token.symbol
+
+            await tx_manager.close()
+
+            explorer_url = config.get_address_url(address)
+            balance_text = "Unable to query" if balance is None else f"{balance} {label}"
+
+            confirmation = f"""💰 **On-chain Balance**
+
+**Network:** {chain.display_name}
+**Address:** `{address}`
+**Balance:** {balance_text}
+
+**View:** {explorer_url}"""
+            data = {
+                "network": chain.value,
+                "address": address,
+                "token": label,
+                "balance": str(balance) if balance is not None else None,
+                "explorer_url": explorer_url,
+            }
+            if balance is None:
+                return ToolResult.partial(
+                    confirmation,
+                    "on-chain balance query returned no token balance",
+                    data=data,
+                )
+            return ToolResult.ok(confirmation, data=data)
+
+        except (ImportError, OSError) as e:
+            logger.error(f"wallet_chain_balance failed (system error): {e}", exc_info=True)
+            return ToolResult.failed(error=f"❌ Failed to query chain balance: {e}")
+        except (ConnectionError, TimeoutError, ValueError) as e:
+            logger.error(f"wallet_chain_balance failed: {e}", exc_info=True)
+            return ToolResult.failed(error=f"❌ Failed to query chain balance: {e}")
+        except Exception as e:
+            logger.error(f"wallet_chain_balance failed: {e}", exc_info=True)
+            return ToolResult.failed(error=f"❌ Failed to query chain balance: {e}")
+
+    @tool(
         name="wallet_networks",
         description="List available blockchain networks for transactions",
         category=ToolCategory.SYSTEM,
@@ -316,7 +433,9 @@ class MultichainToolsMixin:
         """
         from .chain_adapters import ChainNetwork, NetworkConfig, TokenRegistry
 
-        mainnet_allowed = os.environ.get("KESTREL_ALLOW_MAINNET", "").lower() == "true"
+        mainnet_allowed = os.environ.get(
+            "KESTREL_ALLOW_MAINNET", ""
+        ).lower() in {"1", "true", "yes"}
 
         lines = ["🌐 **Available Networks**", ""]
 
@@ -405,8 +524,7 @@ class MultichainToolsMixin:
         try:
             from .transaction_manager import TransactionManager
 
-            db_path = self.wallet.db_path
-            storage_dir = Path(db_path).parent if db_path else Path(os.environ.get("KESTREL_DB_PATH", "./agent_dbs"))
+            storage_dir = self._get_wallet_storage_dir()
 
             tx_manager = TransactionManager(
                 agent_id=self.wallet.agent_id,
