@@ -24,14 +24,18 @@ evm = [
 stripe = [
     "stripe>=10.0.0",
 ]
+x402 = [
+    "x402[httpx]>=2.9.0",
+]
 # All optional deps
 all = [
     "kestrel-feature-wallet[evm]",
     "kestrel-feature-wallet[stripe]",
+    "kestrel-feature-wallet[x402]",
     "kestrel-feature-wallet[test]",
 ]
 test = [
-    "kestrel-feature-wallet[evm,stripe]",
+    "kestrel-feature-wallet[evm,stripe,x402]",
     "fastapi>=0.115.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=1.1.0",
