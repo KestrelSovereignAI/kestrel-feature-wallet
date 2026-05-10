@@ -28,6 +28,7 @@ stripe = [
 all = [
     "kestrel-feature-wallet[evm]",
     "kestrel-feature-wallet[stripe]",
+    "kestrel-feature-wallet[test]",
 ]
 test = [
     "kestrel-feature-wallet[evm,stripe]",

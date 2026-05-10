@@ -113,7 +113,9 @@ class TransactionManager:
             self.daily_limit_usd = self.DEFAULT_DAILY_LIMIT_USD
 
         # Security settings
-        self.allow_mainnet = os.environ.get("KESTREL_ALLOW_MAINNET", "").lower() == "true"
+        self.allow_mainnet = os.environ.get(
+            "KESTREL_ALLOW_MAINNET", ""
+        ).lower() in {"1", "true", "yes"}
         self.require_approval = os.environ.get("KESTREL_TX_REQUIRE_APPROVAL", "true").lower() != "false"
 
         # Adapters cache
