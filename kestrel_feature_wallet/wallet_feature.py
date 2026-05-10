@@ -24,7 +24,7 @@ Chain-specific logic is delegated to mixin modules:
 
 import logging
 from decimal import Decimal, InvalidOperation
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from kestrel_sdk.features.base import Feature, tool
 from kestrel_sdk.hooks.base import Hook
@@ -60,6 +60,7 @@ class WalletFeature(
     def __init__(self, agent):
         super().__init__(agent)
         self.wallet: Optional[WalletAgent] = None
+        self._stripe_webhook_handler: Any = None
 
     @property
     def tool_description(self) -> str:
@@ -121,6 +122,121 @@ class WalletFeature(
     def get_hooks(self) -> List[Hook]:
         """Return the transaction security hook for auto-registration."""
         return [TransactionSecurityHook()]
+
+    def get_router(self) -> Any:
+        """Return wallet-owned API routes for host applications.
+
+        Kestrel Sovereign mounts feature routers from registered entry
+        points, so the Stripe on-ramp webhook lives with the wallet feature
+        package instead of being imported by core.
+        """
+        try:
+            from fastapi import APIRouter, Request
+            from fastapi.responses import JSONResponse
+        except ImportError:
+            logger.warning(
+                "fastapi is not installed; wallet webhook router is unavailable"
+            )
+            return None
+
+        router = APIRouter()
+
+        @router.post("/webhooks/stripe/crypto")
+        async def stripe_crypto_webhook(request: Request):
+            handler = self._get_stripe_webhook_handler()
+            if not handler:
+                logger.error("Stripe webhook handler not available")
+                return JSONResponse(
+                    content={"error": "Webhook handler not configured"},
+                    status_code=503,
+                )
+
+            async def on_deposit_complete(session: Any) -> None:
+                await self._dispatch_stripe_deposit_complete(request, session)
+
+            handler.on_deposit_complete = on_deposit_complete
+
+            try:
+                payload = await request.body()
+                signature = request.headers.get("Stripe-Signature")
+                result = await handler.handle_webhook(payload, signature)
+
+                if result.success:
+                    return {"status": "received", "message": result.message}
+
+                logger.error(f"Webhook processing failed: {result.error}")
+                return JSONResponse(
+                    content={"error": result.error},
+                    status_code=400,
+                )
+            except Exception as e:
+                logger.error(f"Webhook error: {e}", exc_info=True)
+                return JSONResponse(
+                    content={"error": "Internal server error"},
+                    status_code=500,
+                )
+
+        return router
+
+    def _get_stripe_webhook_handler(self) -> Any:
+        """Lazy-create the Stripe webhook handler when the route is called."""
+        if self._stripe_webhook_handler is None:
+            try:
+                from .onramp import StripeOnRamp, StripeWebhookHandler
+
+                onramp = StripeOnRamp()
+                self._stripe_webhook_handler = StripeWebhookHandler(onramp)
+                logger.info("Stripe webhook handler initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Stripe webhook handler: {e}")
+        return self._stripe_webhook_handler
+
+    def _resolve_stripe_deposit_agent(self, request: Any, session: Any) -> Any:
+        """Resolve the agent that owns a completed Stripe on-ramp session."""
+        target_did = getattr(session, "agent_did", None)
+        manager = getattr(getattr(request, "app", None), "state", None)
+        manager = getattr(manager, "agent_manager", None)
+
+        if manager is not None and target_did:
+            try:
+                for _name, agent in manager.list_agents().items():
+                    if getattr(agent, "did", None) == target_did:
+                        return agent
+            except Exception as e:
+                logger.warning(
+                    "AgentManager lookup failed for stripe deposit %s: %s",
+                    getattr(session, "session_id", "<unknown>"),
+                    e,
+                )
+
+        app_state = getattr(getattr(request, "app", None), "state", None)
+        return getattr(app_state, "agent", None) or self.agent
+
+    async def _dispatch_stripe_deposit_complete(
+        self, request: Any, session: Any
+    ) -> None:
+        """Wake the owning agent after a completed Stripe on-ramp deposit."""
+        target_agent = self._resolve_stripe_deposit_agent(request, session)
+        callback = getattr(target_agent, "on_stripe_deposit_complete", None)
+        if callback is None:
+            logger.warning(
+                "Stripe deposit %s acknowledged but no agent could be resolved "
+                "to wake (looked for did=%r)",
+                getattr(session, "session_id", "<unknown>"),
+                getattr(session, "agent_did", None),
+            )
+            return
+
+        try:
+            await callback(session)
+        except Exception as e:
+            logger.error(
+                "Failed to dispatch stripe deposit signal for session %s: %s",
+                getattr(session, "session_id", "<unknown>"),
+                e,
+                exc_info=True,
+            )
+            raise
 
     async def shutdown(self):
         """Cleanup wallet resources."""
