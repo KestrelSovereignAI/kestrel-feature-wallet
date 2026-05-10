@@ -157,7 +157,7 @@ class NetworkConfig:
                 chain_id=84532,
                 native_token="ETH",
                 explorer_url="https://sepolia.basescan.org",
-                faucet_url="https://www.coinbase.com/faucets/base-ethereum-goerli-faucet",
+                faucet_url="https://docs.base.org/base-chain/network-information/network-faucets",
             ),
             ChainNetwork.BASE_MAINNET: cls(
                 network=ChainNetwork.BASE_MAINNET,
