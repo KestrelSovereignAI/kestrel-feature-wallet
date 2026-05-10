@@ -5,25 +5,24 @@ Multi-currency agent wallet with Stripe on-ramp for Kestrel Sovereign. Supports 
 ## Installation
 
 ```bash
-uv pip install git+https://github.com/KestrelSovereignAI/kestrel-feature-wallet.git
+uv pip install kestrel-feature-wallet
 ```
 
 With EVM chain support:
 
 ```bash
-uv pip install "kestrel-feature-wallet[evm] @ git+https://github.com/KestrelSovereignAI/kestrel-feature-wallet.git"
+uv pip install "kestrel-feature-wallet[evm]"
 ```
 
 With Stripe on-ramp:
 
 ```bash
-uv pip install "kestrel-feature-wallet[stripe] @ git+https://github.com/KestrelSovereignAI/kestrel-feature-wallet.git"
+uv pip install "kestrel-feature-wallet[stripe]"
 ```
 
 ## Dependencies
 
 - `kestrel-sovereign-sdk`
-- `kestrel-sovereign`
 - `aiosqlite>=0.21.0`
 - `httpx>=0.27.0`
 - `cryptography>=45.0.5`
@@ -43,6 +42,6 @@ Once installed, the `WalletFeature` is automatically discovered by kestrel-sover
 ## Development
 
 ```bash
-uv pip install kestrel-sovereign-sdk && uv pip install -e .
+uv pip install -e ".[test]"
 uv run pytest
 ```

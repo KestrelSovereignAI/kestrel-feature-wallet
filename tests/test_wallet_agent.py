@@ -2,6 +2,7 @@ import pytest
 import pytest_asyncio
 from decimal import Decimal
 from kestrel_feature_wallet import WalletAgent, Currency
+from kestrel_feature_wallet.filecoin_keys import FilecoinKeyManager
 
 
 @pytest.mark.asyncio
@@ -281,3 +282,22 @@ class TestWalletPersistence:
         assert Decimal(status["total_balance"]) == Decimal('90')
         assert len(status["recent_transactions"]) == 1
         assert status["transaction_count"] == 1
+
+
+class TestFilecoinKeyPersistence:
+    @pytest.mark.asyncio
+    async def test_filecoin_key_manager_persists_keys_without_sovereign_dependency(
+        self, tmp_path, monkeypatch
+    ):
+        """Clean package installs must persist spendable keys locally."""
+        monkeypatch.setenv("KESTREL_DATA_KEY", "test-master-key-for-wallet-package")
+
+        manager = FilecoinKeyManager(storage_dir=tmp_path)
+        address, public_key = await manager.generate_address("agent-wallet-001")
+
+        assert address.startswith("t1")
+        assert public_key
+        assert manager.has_address("agent-wallet-001")
+
+        reloaded = FilecoinKeyManager(storage_dir=tmp_path)
+        assert reloaded.get_address("agent-wallet-001") == address
