@@ -1,6 +1,6 @@
 [project]
 name = "kestrel-feature-wallet"
-version = "0.1.0"
+version = "0.1.1"
 description = "Multi-currency agent wallet with Stripe on-ramp for Kestrel Sovereign"
 readme = "README.md"
 license = "Apache-2.0"
@@ -31,6 +31,7 @@ all = [
 ]
 test = [
     "kestrel-feature-wallet[evm,stripe]",
+    "fastapi>=0.115.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=1.1.0",
     "pytest-timeout>=2.3.1",

@@ -210,6 +210,8 @@ class StripeWebhookHandler:
         if transaction.get("source_amount"):
             fiat_amount = Decimal(transaction["source_amount"])
 
+        was_succeeded = session.status == OnRampStatus.SUCCEEDED
+
         # Update session
         updated_session = await self.onramp.update_session_status(
             session.session_id,
@@ -222,6 +224,20 @@ class StripeWebhookHandler:
             f"Updated session {session.session_id}: {stripe_status} "
             f"(crypto: {crypto_amount})"
         )
+
+        if (
+            new_status == OnRampStatus.SUCCEEDED
+            and not was_succeeded
+            and crypto_amount is not None
+            and fiat_amount is not None
+            and self.on_deposit_complete
+            and updated_session
+        ):
+            try:
+                await self.on_deposit_complete(updated_session)
+                self._mark_deposit_callback_dispatched(updated_session)
+            except Exception as e:
+                logger.error(f"Deposit callback failed: {e}")
 
         return WebhookResult(
             success=True,
@@ -260,6 +276,46 @@ class StripeWebhookHandler:
         if transaction.get("source_amount"):
             fiat_amount = Decimal(transaction["source_amount"])
 
+        if session.status == OnRampStatus.SUCCEEDED:
+            updated_session = None
+            if (
+                (crypto_amount is not None and session.crypto_amount is None)
+                or (fiat_amount is not None and session.fiat_amount is None)
+            ):
+                updated_session = await self.onramp.update_session_status(
+                    session.session_id,
+                    OnRampStatus.SUCCEEDED,
+                    crypto_amount=crypto_amount,
+                    fiat_amount=fiat_amount,
+                )
+                if (
+                    not self._deposit_callback_dispatched(updated_session)
+                    and self.on_deposit_complete
+                ):
+                    try:
+                        await self.on_deposit_complete(updated_session)
+                        self._mark_deposit_callback_dispatched(updated_session)
+                    except Exception as e:
+                        logger.error(f"Deposit callback failed: {e}")
+            elif (
+                not self._deposit_callback_dispatched(session)
+                and self.on_deposit_complete
+            ):
+                try:
+                    await self.on_deposit_complete(session)
+                    self._mark_deposit_callback_dispatched(session)
+                except Exception as e:
+                    logger.error(f"Deposit callback failed: {e}")
+            logger.info(
+                "Ignoring duplicate completed webhook for on-ramp session %s",
+                session.session_id,
+            )
+            return WebhookResult(
+                success=True,
+                session_id=session.session_id,
+                message="Deposit already completed",
+            )
+
         # Update session to succeeded
         updated_session = await self.onramp.update_session_status(
             session.session_id,
@@ -278,6 +334,7 @@ class StripeWebhookHandler:
         if self.on_deposit_complete and updated_session:
             try:
                 await self.on_deposit_complete(updated_session)
+                self._mark_deposit_callback_dispatched(updated_session)
             except Exception as e:
                 logger.error(f"Deposit callback failed: {e}")
 
@@ -324,6 +381,15 @@ class StripeWebhookHandler:
             session_id=session.session_id,
             message=f"Session marked as failed: {reason}",
         )
+
+    def _deposit_callback_dispatched(self, session: OnRampSession) -> bool:
+        return bool(session.metadata.get("deposit_callback_dispatched"))
+
+    def _mark_deposit_callback_dispatched(self, session: OnRampSession) -> None:
+        session.metadata["deposit_callback_dispatched"] = True
+        save_session = getattr(self.onramp, "_save_session", None)
+        if save_session:
+            save_session(session)
 
     def __repr__(self) -> str:
         return f"StripeWebhookHandler(onramp={self.onramp})"
