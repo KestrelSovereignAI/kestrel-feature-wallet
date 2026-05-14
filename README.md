@@ -54,6 +54,7 @@ Once installed, the `WalletFeature` is automatically discovered by kestrel-sover
 | `BASE_SEPOLIA_RPC` | Optional Base Sepolia RPC override; defaults to `https://sepolia.base.org` |
 | `BASE_MAINNET_RPC` | Optional Base Mainnet RPC override; defaults to `https://mainnet.base.org` |
 | `KESTREL_ALLOW_MAINNET` | Set to `true` or `1` only when the operator intentionally enables real-value mainnet transactions |
+| `KESTREL_X402_MAX_USDC_PER_REQUEST` | Maximum x402 USDC invoice the buyer will sign; defaults to `1` |
 | `KESTREL_TX_DAILY_LIMIT_USD` | Daily mainnet spending limit; defaults to `100` |
 | `STRIPE_API_KEY` | Stripe API key (for on-ramp) |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook secret (for on-ramp) |
@@ -84,6 +85,7 @@ Current faucet references:
 ## x402 Buyer
 
 `X402Buyer` wraps the Python x402 SDK with the agent's EVM private key and returns payment receipt metadata for audit trails.
+It defaults to Base Sepolia and filters out Base Mainnet payment requirements unless `KESTREL_ALLOW_MAINNET` is explicitly enabled.
 
 ```python
 from kestrel_feature_wallet import X402Buyer

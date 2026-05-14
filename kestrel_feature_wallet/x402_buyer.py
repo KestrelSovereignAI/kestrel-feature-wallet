@@ -8,6 +8,8 @@ without the x402 extra installed.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
+import os
 from typing import Any, Callable, Mapping, Optional
 
 
@@ -34,6 +36,11 @@ class X402PaidResponse:
 HttpClientFactory = Callable[[Any, Mapping[str, Any]], Any]
 PaymentClientFactory = Callable[[Any], Any]
 
+BASE_SEPOLIA_NETWORK = "eip155:84532"
+BASE_MAINNET_NETWORKS = {"eip155:8453", "base"}
+DEFAULT_MAX_USDC_PER_REQUEST = Decimal("1")
+USDC_DECIMALS = Decimal("1000000")
+
 
 def _serialize_settle_response(value: Any) -> dict[str, Any]:
     if value is None:
@@ -45,6 +52,38 @@ def _serialize_settle_response(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
         return dict(value)
     return {"value": repr(value)}
+
+
+def _truthy_env(value: str | None) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes"}
+
+
+def _coerce_max_usdc(value: Decimal | str | int | float | None) -> Decimal | None:
+    if value is None:
+        env_value = os.environ.get("KESTREL_X402_MAX_USDC_PER_REQUEST")
+        if not env_value:
+            return DEFAULT_MAX_USDC_PER_REQUEST
+        value = env_value
+
+    if isinstance(value, Decimal):
+        return value
+
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise X402BuyerError("Invalid KESTREL_X402_MAX_USDC_PER_REQUEST value") from exc
+
+
+def _network_values(networks: str | list[str] | None) -> list[str]:
+    if networks is None:
+        return []
+    if isinstance(networks, str):
+        return [networks]
+    return list(networks)
+
+
+def _network_is_mainnet(network: str) -> bool:
+    return network in BASE_MAINNET_NETWORKS or network.endswith(":8453")
 
 
 class X402Buyer:
@@ -59,13 +98,21 @@ class X402Buyer:
         self,
         private_key: bytes | str,
         *,
-        networks: str | list[str] | None = "eip155:*",
+        networks: str | list[str] | None = BASE_SEPOLIA_NETWORK,
+        allow_mainnet: Optional[bool] = None,
+        max_usdc_per_request: Decimal | str | int | float | None = None,
         http_client_kwargs: Optional[dict[str, Any]] = None,
         http_client_factory: Optional[HttpClientFactory] = None,
         payment_client_factory: Optional[PaymentClientFactory] = None,
     ) -> None:
         self.private_key = private_key
         self.networks = networks
+        self.allow_mainnet = (
+            _truthy_env(os.environ.get("KESTREL_ALLOW_MAINNET"))
+            if allow_mainnet is None
+            else allow_mainnet
+        )
+        self.max_usdc_per_request = _coerce_max_usdc(max_usdc_per_request)
         self.http_client_kwargs = http_client_kwargs or {}
         self._http_client_factory = http_client_factory
         self._payment_client_factory = payment_client_factory
@@ -85,18 +132,41 @@ class X402Buyer:
         account = Account.from_key(self.private_key)
         signer = EthAccountSigner(account)
         client = x402Client()
-        register_exact_evm_client(client, signer, networks=self.networks)
+        register_exact_evm_client(
+            client,
+            signer,
+            networks=self.networks,
+            policies=[self._payment_policy],
+        )
 
         try:
             from x402.mechanisms.evm.upto.client import UptoEvmScheme
 
-            client.register("eip155:*", UptoEvmScheme(signer))
+            upto_networks = _network_values(self.networks) or ["eip155:*"]
+            for network in upto_networks:
+                client.register(network, UptoEvmScheme(signer))
         except ImportError:
             # Older x402 versions may not expose the upto client; exact still
             # supports fixed-price payment flows.
             pass
 
         return client
+
+    def _payment_policy(self, version: int, requirements: list[Any]) -> list[Any]:
+        filtered = []
+        for requirement in requirements:
+            network = str(getattr(requirement, "network", ""))
+            if not self.allow_mainnet and _network_is_mainnet(network):
+                continue
+            if self.max_usdc_per_request is not None:
+                try:
+                    amount_usdc = Decimal(str(requirement.amount)) / USDC_DECIMALS
+                except (AttributeError, InvalidOperation):
+                    continue
+                if amount_usdc > self.max_usdc_per_request:
+                    continue
+            filtered.append(requirement)
+        return filtered
 
     def _build_http_client(self, client: Any) -> Any:
         if self._http_client_factory:

@@ -73,6 +73,37 @@ def test_x402_payment_receipt_absent_without_header():
     assert receipt is None
 
 
+def test_x402_policy_filters_base_mainnet_without_opt_in():
+    buyer = X402Buyer(private_key=b"\x01" * 32, allow_mainnet=False)
+
+    filtered = buyer._payment_policy(
+        2,
+        [
+            SimpleNamespace(network="eip155:8453", amount="10000"),
+            SimpleNamespace(network="eip155:84532", amount="10000"),
+        ],
+    )
+
+    assert [req.network for req in filtered] == ["eip155:84532"]
+
+
+def test_x402_policy_filters_oversized_usdc_invoice():
+    buyer = X402Buyer(
+        private_key=b"\x01" * 32,
+        max_usdc_per_request="0.25",
+    )
+
+    filtered = buyer._payment_policy(
+        2,
+        [
+            SimpleNamespace(network="eip155:84532", amount="250000"),
+            SimpleNamespace(network="eip155:84532", amount="250001"),
+        ],
+    )
+
+    assert [req.amount for req in filtered] == ["250000"]
+
+
 @pytest.mark.asyncio
 async def test_request_with_payment_uses_injected_clients(monkeypatch):
     fake_response = FakeResponse(headers={"X-PAYMENT-RESPONSE": "encoded"})
