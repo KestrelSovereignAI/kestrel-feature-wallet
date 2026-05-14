@@ -1,6 +1,6 @@
 [project]
 name = "kestrel-feature-wallet"
-version = "0.1.1"
+version = "0.1.2"
 description = "Multi-currency agent wallet with Stripe on-ramp for Kestrel Sovereign"
 readme = "README.md"
 license = "Apache-2.0"
